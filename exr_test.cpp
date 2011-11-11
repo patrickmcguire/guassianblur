@@ -51,7 +51,8 @@ readRgba (const char fileName[],
 Array2D<Rgba> * guassian_blur(float sigma, int width, int height, const Array2D<Rgba> &image) {
 
 
-	Array2D<Rgba> * firstPass = new Array2D<Rgba>(width,height);
+	Array2D<Rgba> firstPass(height, width);
+	firstPass.resizeErase(height, width);
 	//Six sigmas until things trail off, so three sigmas in each direction
 	float maxRadius = 3 * sigma;
 	int kernelRadius = ceil(maxRadius);
@@ -73,52 +74,51 @@ Array2D<Rgba> * guassian_blur(float sigma, int width, int height, const Array2D<
 		kernel[i] = kernel[i] / sum;
 	}
 
-	for(int x = 0; x < height; x++) {
-		for(int y = 0; y < width; y++) {
+	for(int x = 0; x < width; x++) {
+		for(int y = 0; y < height; y++) {
 			half * rValue = new half(0);
 			half * gValue = new half(0);
 			half * bValue = new half(0);
 			half * aValue = new half(0);
 			for(int i = 0; i < kernelWidth; i++) {
-				int yIndex = CLAMP(y-kernelRadius + i, 0, width-1);
+				int xIndex = CLAMP(x-kernelRadius + i, 0, width-1);
 				float weight = kernel[i];
-				Rgba pixel = image[x][yIndex];
+				Rgba pixel = image[y][xIndex];
 				*rValue += pixel.r * weight;
 				*gValue += pixel.g * weight;
 				*bValue += pixel.b * weight;
 				*aValue += pixel.a * weight;
 			}
-			(*firstPass)[x][y] = *(new Rgba(*rValue, *gValue, *bValue, *aValue));
+			firstPass[y][x] = *(new Rgba(*rValue, *gValue, *bValue, *aValue));
 		}
 	}
 
 
-	Array2D<Rgba> * secondPass = new Array2D<Rgba>(width,height);
+	Array2D<Rgba> * secondPass = new Array2D<Rgba>(height,width);
+	secondPass->resizeErase(height, width);
 	//Yay, now do the Y's! Isn't this fun?
-	for(int x = 0; x < height; x++) {
-		for(int y = 0; y < width; y++) {
+	for(int x = 0; x < width; x++) {
+		for(int y = 0; y < height; y++) {
 			half rValue = 0;
 			half gValue = 0;
 			half bValue = 0;
 			half aValue = 0;
 			for(int i = 0; i < kernelWidth; i++) {
-				int yIndex = CLAMP(y-kernelRadius + i, 0, width-1);
+				int yIndex = CLAMP(y-kernelRadius + i, 0, height-1);
 				float weight = kernel[i];
-				Rgba pixel = (*firstPass)[x][yIndex];
+				Rgba pixel = firstPass[yIndex][x];
 				rValue += pixel.r * weight;
 				gValue += pixel.g * weight;
 				bValue += pixel.b * weight;
 				aValue += pixel.a * weight;
 			}
-			(*secondPass)[x][y] = *(new Rgba(rValue, gValue, bValue, aValue));
+			(*secondPass)[y][x] = *(new Rgba(rValue, gValue, bValue, aValue));
 		}
 
 	}
 
-	delete(firstPass);
+	delete(kernel);
 	return secondPass;
-
-	return(firstPass);
 }
 
 int main (int argc, char *argv[])

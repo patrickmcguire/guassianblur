@@ -11,7 +11,7 @@ test: main aatestR.exr checkerboard_many.exr checkerboard_small.exr mttamwest.ex
 	./main sailplane.exr -b 0.8
 	./main checkerboard_many.exr -b 0.8 
 	./main checkerboard_small.exr -b 0.8
-#	./main mttamwest.exr -b 0.8
+	./main mttamwest.exr -b 0.8
 	./main squares_medium.exr -b 0.8
 	./main squares_small.exr -b 0.8
 	./main stilllife.exr -b 0.8
