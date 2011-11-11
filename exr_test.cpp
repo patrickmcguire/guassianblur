@@ -158,12 +158,12 @@ Array2D<Rgba> * scaleImage(const Array2D<Rgba> & image, float scale, int & width
 			half * bValue = new half(0);
 			half * aValue = new half(0);
 			for(int i = 0; i < kernelWidth; i++) {
-				float val = (float)newX/scale - kernelRadius + i;
+				float val = (-maxRadius + i) / scale;
 				kernel[i] = gauss(val,sigma);
 			}
 			normalize(kernel,kernelWidth);
 			for(int i = 0; i < kernelWidth; i++) {
-				float val = (float)newX/scale - kernelRadius + i;
+				float val = (-maxRadius + i) / scale;
 				float weight = kernel[i];
 				int xIndex = CLAMP(round(val), 0, (width - 1));
 				Rgba pixel = image[y][xIndex];
@@ -185,12 +185,12 @@ Array2D<Rgba> * scaleImage(const Array2D<Rgba> & image, float scale, int & width
 			half * bValue = new half(0);
 			half * aValue = new half(0);
 			for(int i = 0; i < kernelWidth; i++) {
-				float val = newY / scale - kernelRadius + i;
+				float val = (-maxRadius + i) / scale;
 				kernel[i] = gauss(val,sigma);
 			}
 			normalize(kernel,kernelWidth);
 			for(int i = 0; i < kernelWidth; i++) {
-				float val = newY / scale - kernelRadius + i;
+				float val = (-maxRadius + i) / scale;
 				int yIndex = CLAMP(round(val), 0, (height-1));
 				Rgba pixel = firstPass[yIndex][newX];
 				*rValue += pixel.r * kernel[i];
@@ -238,7 +238,14 @@ int main (int argc, char *argv[])
         	/* Width and height will be changed by function */
         	Array2D<Rgba> * scaled = scaleImage(p, scale, width, height, h);
         	//@todo: change the header to fit the width and height infos
-        	writeRgba(outputFile, &((*scaled)[0][0]), width, height, h);
+        	Header h2(Box2i(Vec2<int>(width,height)),
+         			  Box2i(Vec2<int>(width,height)),
+        			  h.pixelAspectRatio(),
+        			  h.screenWindowCenter(),
+        			  h.screenWindowWidth(),
+        			  h.lineOrder(),
+        			  h.compression());
+        	writeRgba(outputFile, &((*scaled)[0][0]), width, height, h2);
         	delete(scaled);
         }
 
