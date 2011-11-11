@@ -24,8 +24,8 @@ writeRgba (const char * fileName,
 RgbaInputFile *
 readRgba (const char fileName[],
           Array2D<Rgba> &pixels,
-          int width,
-          int height)
+          int & width,
+          int & height)
 {
     //
     // Read an RGBA image using class RgbaInputFile:
@@ -48,37 +48,77 @@ readRgba (const char fileName[],
 }
 
 
-void guassian_blur(float sigma, int width, int height, const Array2D<Rgba> &image, Array2D<Rgba> &newImage) {
+Array2D<Rgba> * guassian_blur(float sigma, int width, int height, const Array2D<Rgba> &image) {
 
+
+	Array2D<Rgba> * firstPass = new Array2D<Rgba>(width,height);
 	//Six sigmas until things trail off, so three sigmas in each direction
 	float maxRadius = 3 * sigma;
 	int kernelRadius = ceil(maxRadius);
 	int kernelWidth = (1 + 2*kernelRadius);
-	float * kernel = new float[kernelWidth^2];
+	float * kernel = new float[kernelWidth];
 	float sum = 0;
+
+	//This kernel can be used in both directions
 	for(int i = -kernelRadius; i <= kernelRadius; i++) {
-		for(int j = -kernelRadius; j <= kernelRadius; j++) {
 			//for sum, and also helps debugging massively
-			float val = (1/(2*pi*(sigma^2))) *
-					e^(-(i^2 + j^2)/(2*(sigma^2)));
-			kernel[(i + kernelRadius)*kernelWidth + (j + kernelRadius)] = val;
+			float val = (1/sqrt(2*pi*(pow(sigma,2)))) *
+					pow(e,(-(pow(i,2))/(2*(pow(sigma,2)))));
+			kernel[i + kernelRadius] = val;
 			sum += val;
-		}
 	}
 
 	//normalize
 	for(int i = 0; i < kernelWidth; i++) {
-		for(int j = 0; j < kernelWidth; j++) {
-			kernel[i*kernelWidth+j] = kernel[i*kernelWidth+j] / sum;
+		kernel[i] = kernel[i] / sum;
+	}
+
+	for(int x = 0; x < height; x++) {
+		for(int y = 0; y < width; y++) {
+			half * rValue = new half(0);
+			half * gValue = new half(0);
+			half * bValue = new half(0);
+			half * aValue = new half(0);
+			for(int i = 0; i < kernelWidth; i++) {
+				int yIndex = CLAMP(y-kernelRadius + i, 0, width-1);
+				float weight = kernel[i];
+				Rgba pixel = image[x][yIndex];
+				*rValue += pixel.r * weight;
+				*gValue += pixel.g * weight;
+				*bValue += pixel.b * weight;
+				*aValue += pixel.a * weight;
+			}
+			(*firstPass)[x][y] = *(new Rgba(*rValue, *gValue, *bValue, *aValue));
 		}
 	}
 
-	for(int x = 0; x < width; x++) {
-		for(int y = 0; y < height; y++) {
+
+	Array2D<Rgba> * secondPass = new Array2D<Rgba>(width,height);
+	//Yay, now do the Y's! Isn't this fun?
+	for(int x = 0; x < height; x++) {
+		for(int y = 0; y < width; y++) {
+			half rValue = 0;
+			half gValue = 0;
+			half bValue = 0;
+			half aValue = 0;
+			for(int i = 0; i < kernelWidth; i++) {
+				int yIndex = CLAMP(y-kernelRadius + i, 0, width-1);
+				float weight = kernel[i];
+				Rgba pixel = (*firstPass)[x][yIndex];
+				rValue += pixel.r * weight;
+				gValue += pixel.g * weight;
+				bValue += pixel.b * weight;
+				aValue += pixel.a * weight;
+			}
+			(*secondPass)[x][y] = *(new Rgba(rValue, gValue, bValue, aValue));
 		}
+
 	}
 
-	//Take advantage of the fact that it's linearly seperable, do lines first, then
+	delete(firstPass);
+	return secondPass;
+
+	return(firstPass);
 }
 
 int main (int argc, char *argv[])
@@ -93,22 +133,19 @@ int main (int argc, char *argv[])
         /*
          * Tomfoolery and shennanigans go here
          */
-
-
-        //copy the image over first....
-        Array2D<Rgba> copy(width,height);
+        Header h = input->header();
 
         float radius = 0;
         //at three sigma can stop caring
-        string two(argv[2]);
-        if((0 == (strcmp(argv[2],"-b"))) && (argc > 3)){
+        if((argc > 3) && (0 == (strcmp(argv[2],"-b")))) {
         	radius = sscanf(argv[3], "%f", &radius);
+        	Array2D<Rgba> * blurred = guassian_blur(radius, width, height, p);
+        	string prefixed = "blurred_";
+        	string filename(argv[1]);
+        	string outputFileName = prefixed + filename;
+        	writeRgba(outputFileName.c_str(), &((*blurred)[0][0]), width, height, h);
         }
 
-
-
-        Header h = input->header();
-        writeRgba ("allred.exr", &p[0][0], width, height, h);
         delete(input);
     }
 
