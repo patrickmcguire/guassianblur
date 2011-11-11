@@ -1,6 +1,16 @@
 
 #include "exr_test.h"
 
+void normalize(float * array, int size) {
+	float sum = 0;
+	for(int i = 0; i < size; i++) {
+		sum += array[i];
+	}
+	for(int i = 0; i < size; i++) {
+		array[i] = array[i] / sum;
+	}
+}
+
 void
 writeRgba (const char * fileName,
            const Rgba *pixels,
@@ -48,7 +58,12 @@ readRgba (const char fileName[],
 }
 
 
-Array2D<Rgba> * guassian_blur(float sigma, int width, int height, const Array2D<Rgba> &image) {
+float gauss(float i, float sigma) {
+	return (1/sqrt(2*pi*(pow(sigma,2)))) *
+						pow(e,(-(pow(i,2))/(2*(pow(sigma,2)))));
+}
+
+Array2D<Rgba> * gaussian_blur(float sigma, int width, int height, const Array2D<Rgba> &image) {
 
 
 	Array2D<Rgba> firstPass(height, width);
@@ -58,21 +73,14 @@ Array2D<Rgba> * guassian_blur(float sigma, int width, int height, const Array2D<
 	int kernelRadius = ceil(maxRadius);
 	int kernelWidth = (1 + 2*kernelRadius);
 	float * kernel = new float[kernelWidth];
-	float sum = 0;
 
 	//This kernel can be used in both directions
 	for(int i = -kernelRadius; i <= kernelRadius; i++) {
 			//for sum, and also helps debugging massively
-			float val = (1/sqrt(2*pi*(pow(sigma,2)))) *
-					pow(e,(-(pow(i,2))/(2*(pow(sigma,2)))));
-			kernel[i + kernelRadius] = val;
-			sum += val;
+			kernel[i + kernelRadius] = gauss(i, sigma);
 	}
 
-	//normalize
-	for(int i = 0; i < kernelWidth; i++) {
-		kernel[i] = kernel[i] / sum;
-	}
+	normalize(kernel, kernelWidth);
 
 	for(int x = 0; x < width; x++) {
 		for(int y = 0; y < height; y++) {
@@ -121,29 +129,117 @@ Array2D<Rgba> * guassian_blur(float sigma, int width, int height, const Array2D<
 	return secondPass;
 }
 
+/* None of these refs are constant, all will change unless scale is 1 */
+Array2D<Rgba> * scaleImage(const Array2D<Rgba> & image, float scale, int & width, int & height, Header & h) {
+
+	/* The data is a little unweildy */
+	int newWidth = round(scale * width);
+	int newHeight = round(scale * height);
+	Array2D<Rgba> firstPass(height, newWidth);
+	firstPass.resizeErase(height, newWidth);
+	Array2D<Rgba> * secondPass = new Array2D<Rgba>(newHeight, newWidth);
+	secondPass->resizeErase(newHeight, newWidth);
+
+	/*
+	 * I'm going to use the Gaussian filter for resampling, with a sigma of 0.5
+	 * scaled to the proper values
+	 */
+	float sigma = 0.5 / scale;
+	float maxRadius = 3 * sigma;
+	int kernelRadius = ceil(maxRadius);
+	int kernelWidth = (1 + 2*kernelRadius);
+	float * kernel = new float[kernelWidth];
+
+	//Let's do X first
+	for(int y = 0; y < height; y++) {
+		for(int newX = 0; newX < newWidth; newX++) {
+			half * rValue = new half(0);
+			half * gValue = new half(0);
+			half * bValue = new half(0);
+			half * aValue = new half(0);
+			for(int i = 0; i < kernelWidth; i++) {
+				float val = (float)newX/scale - kernelRadius + i;
+				kernel[i] = gauss(val,sigma);
+			}
+			normalize(kernel,kernelWidth);
+			for(int i = 0; i < kernelWidth; i++) {
+				float val = (float)newX/scale - kernelRadius + i;
+				float weight = kernel[i];
+				int xIndex = CLAMP(round(val), 0, (width - 1));
+				Rgba pixel = image[y][xIndex];
+				*rValue += pixel.r * weight;
+				*gValue += pixel.g * weight;
+				*bValue += pixel.g * weight;
+				*aValue += pixel.a * weight;
+			}
+			firstPass[y][newX] = *(new Rgba(*rValue, *gValue, *bValue, *aValue));
+		}
+	}
+
+
+	//Now let's do the Y's.
+	for(int newX = 0; newX < newWidth; newX++) {
+		for(int newY = 0; newY < newHeight; newY++) {
+			half * rValue = new half(0);
+			half * gValue = new half(0);
+			half * bValue = new half(0);
+			half * aValue = new half(0);
+			for(int i = 0; i < kernelWidth; i++) {
+				float val = newY / scale - kernelRadius + i;
+				kernel[i] = gauss(val,sigma);
+			}
+			normalize(kernel,kernelWidth);
+			for(int i = 0; i < kernelWidth; i++) {
+				float val = newY / scale - kernelRadius + i;
+				int yIndex = CLAMP(round(val), 0, (height-1));
+				Rgba pixel = firstPass[yIndex][newX];
+				*rValue += pixel.r * kernel[i];
+				*gValue += pixel.g * kernel[i];
+				*bValue += pixel.b * kernel[i];
+				*aValue += pixel.a * kernel[i];
+			}
+			(*secondPass)[newY][newX] = *(new Rgba(*rValue, *gValue, *bValue, *aValue));
+		}
+	}
+
+	/* Don't forget all the other info that has to be updated before we can write */
+	height = newHeight;
+	width = newWidth;
+	//h.setMaxImageSize(newWidth,newHeight);
+	return secondPass;
+}
+
 int main (int argc, char *argv[])
 {
     try
     {
-    	/* Will be changed at a later point */
+
+    	char * inputFile = argv[1];
+    	char * outputFile = argv[2];
+
         int width = 0;
         int height = 0;
         Array2D<Rgba> p;
-        RgbaInputFile * input = readRgba (argv[1], p, width, height);
-        /*
-         * Tomfoolery and shennanigans go here
-         */
+        RgbaInputFile * input = readRgba (inputFile, p, width, height);
         Header h = input->header();
 
-        float radius = 0;
-        //at three sigma can stop caring
-        if((argc > 3) && (0 == (strcmp(argv[2],"-b")))) {
-        	radius = sscanf(argv[3], "%f", &radius);
-        	Array2D<Rgba> * blurred = guassian_blur(radius, width, height, p);
-        	string prefixed = "blurred_";
-        	string filename(argv[1]);
-        	string outputFileName = prefixed + filename;
-        	writeRgba(outputFileName.c_str(), &((*blurred)[0][0]), width, height, h);
+
+        if((argc > 4) && (0 == (strcmp(argv[3],"-b")))) {
+        	float radius;
+        	sscanf(argv[4], "%f", &radius);
+        	Array2D<Rgba> * blurred = gaussian_blur(radius, width, height, p);
+        	writeRgba(outputFile, &((*blurred)[0][0]), width, height, h);
+        	delete(blurred);
+        }
+
+        else if((argc > 4) && (0 == strcmp(argv[3],"-s"))) {
+        	float scale;
+        	sscanf(argv[4], "%f", &scale);
+        	/* Width and height will be changed by function */
+        	Array2D<Rgba> * scaled = scaleImage(p, scale, width, height, h);
+        	//@todo: change the header to fit the width and height infos
+        	writeRgba(outputFile, &((*scaled)[0][0]), width, height, h);
+        	delete(scaled);
         }
 
         delete(input);
